@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import List, Optional
 
 class CartItemCreate(BaseModel):
-    product_id: int
+    product_id: int = Field(..., gt=0, description="Product ID must be a positive integer.")
     quantity: int = Field(..., gt=0, description="Quantity must be greater than 0")
 
 class CartItemResponse(BaseModel):

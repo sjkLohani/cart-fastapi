@@ -15,7 +15,7 @@ app = FastAPI(
 )
 
 # Mocking user context via a Header for simulation simplicity
-def get_current_user_id(x_user_id: int = Header(..., description="Simulated logged-in User ID")):
+def get_current_user_id(x_user_id: int = Header(..., description="logged-in User ID", gt=0)):
     return x_user_id
 
 @app.get("/cart", response_model=CartResponse, tags=["Cart"])
