@@ -60,12 +60,59 @@ jobs:
         ECR_REPOSITORY: cart-api-repo
         IMAGE_TAG: latest
       run: |
-        # This builds your Dockerfile, tags it dynamically, and pushes it safely to the cloud
         docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
         docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
     
     - name: Run Bandit Security Static Code Analysis
       run: |
         pip install bandit
-        # Scans all Python files, ignores the virtual environment, and flags medium/high severity security issues
         bandit -r . -x .venv/ -ll
+
+  deploy:
+    needs: code-quality-and-test  # This ensures it ONLY runs if tests pass!
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH into EC2 and Execute Single-Host Blue-Green Swap
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            # 1. Authenticate Docker with your AWS ECR vault
+            aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 654278500703.dkr.ecr.us-east-1.amazonaws.com
+
+            # 2. Pull down the fresh image built during the factory stage
+            docker pull 654278500703.dkr.ecr.us-east-1.amazonaws.com/cart-api-repo:latest
+
+            # 3. Orchestrate the Blue-Green Swap
+            if docker ps --format '{{.Names}}' | grep -q "cart_api_blue"; then
+              echo "Blue container is currently live. Deploying to Green slot..."
+              
+              # Boot up Green on Port 8002 using our confirmed database network link
+              docker run -d --name cart_api_green -p 8002:8000 -e DATABASE_URL='mysql+pymysql://root:Password123!@172.31.47.146:3306/cart_db' 654278500703.dkr.ecr.us-east-1.amazonaws.com/cart-api-repo:latest
+              
+              # Wait 5 seconds for app validation
+              sleep 5
+              
+              # Atomically rewrite Nginx pointer from 8001 to 8002
+              sudo sed -i 's/8001/8002/g' /etc/nginx/sites-available/default
+              sudo systemctl reload nginx
+              
+              # Terminate old Blue version safely
+              docker rm -f cart_api_blue || true
+            else
+              echo "Green is live (or clean server initialization). Deploying to Blue slot..."
+              
+              # Boot up Blue on Port 8001
+              docker run -d --name cart_api_blue -p 8001:8000 -e DATABASE_URL='mysql+pymysql://root:Password123!@172.31.47.146:3306/cart_db' 654278500703.dkr.ecr.us-east-1.amazonaws.com/cart-api-repo:latest
+              
+              sleep 5
+              
+              # Atomically rewrite Nginx pointer from 8002 to 8001
+              sudo sed -i 's/8002/8001/g' /etc/nginx/sites-available/default
+              sudo systemctl reload nginx
+              
+              # Terminate old Green version safely
+              docker rm -f cart_api_green || true
+            fi
