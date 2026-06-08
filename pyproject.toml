@@ -1,0 +1,9 @@
+[tool.ruff]
+# Target Python version 3.11 matching your Dockerfile base image
+target-version = "py311"
+line-length = 88
+
+[tool.ruff.lint]
+# Select formatting (E, F) and code quality (W, I) rulesets
+select = ["E", "F", "W", "I"]
+ignore = []

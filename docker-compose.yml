@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  db:
+    image: mysql:8.0
+    container_name: cart_mysql_db
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: cart_db
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  api:
+    build: .
+    container_name: cart_fastapi_app
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      # This tells SQLAlchemy to connect to the 'db' container instead of localhost
+      - DATABASE_URL=mysql+pymysql://root:rootpassword@db:3306/cart_db
+    depends_on:
+      - db
+
+volumes:
+  mysql_data:

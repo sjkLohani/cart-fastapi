@@ -1,7 +1,6 @@
 import logging
 import os
 
-# Configure logging to write to both a file and the terminal
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] UserID:%(user_id)s - %(message)s",
@@ -11,12 +10,18 @@ logging.basicConfig(
     ]
 )
 
-def log_user_activity(user_id: int, message: str, level: str = "info"):
-    # Using 'extra' to pass the user_id into the log format
-    if level == "info":
-        logging.info(message, extra={"user_id": user_id})
+def log_user_activity(user_id, message: str, level: str = "info"):
+    # Cast user_id to string to prevent any weird layout formatting anomalies with large numbers
+    extra_data = {"user_id": str(user_id)}
+    
+    if level == "error":
+        logging.error(message, extra=extra_data)
+    elif level == "critical":
+        logging.critical(message, extra=extra_data)
     else:
-        logging.error(message, extra={"user_id": user_id})
-logger = logging.getLogger("cart_api")
+        logging.info(message, extra=extra_data)
 
-DATABASE_URL = "mysql+pymysql://root:Password123!@localhost:3306/cart_db"
+DATABASE_URL = os.getenv(
+    "DATABASE_URL", 
+    "mysql+pymysql://root:Password123!@localhost:3306/cart_db"
+)

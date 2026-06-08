@@ -1,0 +1,44 @@
+name: Cart API Continuous Integration Pipeline
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  code-quality-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      # Spin up an automated testing database instance inside the cloud runner environment
+      mysql-test-db:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: Password123!
+          MYSQL_DATABASE: cart_db
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+    steps:
+    - name: Checkout Application Repository Code
+      uses: actions/checkout@v4
+
+    - name: Set up Python 3.11 Environment
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+        cache: 'pip'
+
+    - name: Install Application Core Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install ruff  # Inject the quality gate engine
+
+    - name: Run Free Student Quality Checker Suite (Ruff Linter)
+      run: ruff check .
+
+    - name: Run Style and Format Assertions (Ruff Format)
+      run: ruff format --check .

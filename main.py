@@ -62,5 +62,5 @@ def health_check(db: Session = Depends(get_db)):
 async def global_exception_handler(request, exc):
     return JSONResponse(
         status_code=500,
-        content={"message": "An unexpected error occurred. Please contact support.", "details": str(exc)},
+        content={"message": "An unexpected error occurred. Please contact support."},
     )
