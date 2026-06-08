@@ -1,10 +1,15 @@
-from pydantic import BaseModel, Field
 from decimal import Decimal
-from typing import List, Optional
+from typing import List
+
+from pydantic import BaseModel, Field
+
 
 class CartItemCreate(BaseModel):
-    product_id: int = Field(..., gt=0, description="Product ID must be a positive integer.")
+    product_id: int = Field(
+        ..., gt=0, description="Product ID must be a positive integer."
+    )
     quantity: int = Field(..., gt=0, description="Quantity must be greater than 0")
+
 
 class CartItemResponse(BaseModel):
     id: int
@@ -15,6 +20,7 @@ class CartItemResponse(BaseModel):
     class Config:
         from_attributes = True
 
+
 class CartResponse(BaseModel):
     id: int
     user_id: int
@@ -23,6 +29,7 @@ class CartResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
 
 class MessageResponse(BaseModel):
     message: str

@@ -1,19 +1,25 @@
+from sqlalchemy.exc import DataError, OperationalError
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import OperationalError, DataError
-from utils.exceptions import DataBoundaryViolation
+
 from models.db_models import Cart, CartItem, Product
+from utils.exceptions import DataBoundaryViolation
+
 
 class CartRepository:
-
     @staticmethod
     def get_active_cart_by_user(db: Session, user_id: int) -> Cart:
         try:
-            return db.query(Cart).filter(
-                Cart.user_id == user_id, 
-                Cart.status == "ACTIVE"
-            ).first()
+            return (
+                db.query(Cart)
+                .filter(Cart.user_id == user_id, Cart.status == "ACTIVE")
+                .first()
+            )
         except (OperationalError, DataError) as db_exc:
-            if "1264" in str(db_exc) or "Out of range" in str(db_exc) or "Overflow" in str(db_exc):
+            if (
+                "1264" in str(db_exc)
+                or "Out of range" in str(db_exc)
+                or "Overflow" in str(db_exc)
+            ):
                 raise DataBoundaryViolation()
             raise db_exc
 
@@ -27,7 +33,11 @@ class CartRepository:
             return db_cart
         except (DataError, OperationalError) as db_exc:
             db.rollback()  # Always clear transaction states during failures
-            if "1264" in str(db_exc) or "Out of range" in str(db_exc) or "Overflow" in str(db_exc):
+            if (
+                "1264" in str(db_exc)
+                or "Out of range" in str(db_exc)
+                or "Overflow" in str(db_exc)
+            ):
                 raise DataBoundaryViolation()
             raise db_exc
 
@@ -37,7 +47,11 @@ class CartRepository:
 
     @staticmethod
     def get_cart_item(db: Session, cart_id: int, product_id: int) -> CartItem:
-        return db.query(CartItem).filter(CartItem.cart_id == cart_id, CartItem.product_id == product_id).first()
+        return (
+            db.query(CartItem)
+            .filter(CartItem.cart_id == cart_id, CartItem.product_id == product_id)
+            .first()
+        )
 
     @staticmethod
     def add_item_to_cart(db: Session, cart_item: CartItem):
@@ -46,7 +60,11 @@ class CartRepository:
             db.commit()
         except (DataError, OperationalError) as db_exc:
             db.rollback()  # Clear failed state before raising
-            if "1264" in str(db_exc) or "Out of range" in str(db_exc) or "Overflow" in str(db_exc):
+            if (
+                "1264" in str(db_exc)
+                or "Out of range" in str(db_exc)
+                or "Overflow" in str(db_exc)
+            ):
                 raise DataBoundaryViolation()
             raise db_exc
 
