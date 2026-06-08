@@ -1,9 +1,7 @@
-name: Cart API Continuous Integration Pipeline
+name: Cart API Continuous Integration & Cloud Deployment Pipeline
 
 on:
   push:
-    branches: [ "main", "master" ]
-  pull_request:
     branches: [ "main", "master" ]
 
 jobs:
@@ -11,7 +9,6 @@ jobs:
     runs-on: ubuntu-latest
 
     services:
-      # Spin up an automated testing database instance inside the cloud runner environment
       mysql-test-db:
         image: mysql:8.0
         env:
@@ -35,10 +32,34 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-        pip install ruff  # Inject the quality gate engine
+        pip install ruff
 
     - name: Run Free Student Quality Checker Suite (Ruff Linter)
       run: ruff check .
 
     - name: Run Style and Format Assertions (Ruff Format)
       run: ruff format --check .
+
+    # ==========================================
+    # AUTOMATED AWS CLOUD DEPLOYMENT (CD PHASE)
+    # ==========================================
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+
+    - name: Log in to AWS Elastic Container Registry (ECR)
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Build, Tag, and Push Docker Image to AWS Cloud
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        ECR_REPOSITORY: cart-api-repo
+        IMAGE_TAG: latest
+      run: |
+        # This builds your Dockerfile, tags it dynamically, and pushes it safely to the cloud
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
