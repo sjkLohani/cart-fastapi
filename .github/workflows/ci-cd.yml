@@ -63,3 +63,9 @@ jobs:
         # This builds your Dockerfile, tags it dynamically, and pushes it safely to the cloud
         docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
         docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+    
+    - name: Run Bandit Security Static Code Analysis
+      run: |
+        pip install bandit
+        # Scans all Python files, ignores the virtual environment, and flags medium/high severity security issues
+        bandit -r . -x .venv/ -ll
