@@ -64,18 +64,23 @@ def seed_database():
         )
         print(f"Products loaded. Valid ID range: [{min_p} to {max_p}]")
 
-# -------------------------------------------------------------
+        # -------------------------------------------------------------
         # STEP 2: SEED 300,000 CARTS (Updated with Safe Statuses)
         # -------------------------------------------------------------
-        print("🚀 Phase 2: Injecting 300,000 carts...")
-        statuses = ['ACTIVE', 'CONVERTED']  # Cleansed to match your verified schema states
+        print("Phase 2: Injecting 300,000 carts...")
+        statuses = [
+            "ACTIVE",
+            "CONVERTED",
+        ]  # Cleansed to match your verified schema states
         for i in range(0, 300000, BATCH_SIZE):
             c_batch = [
                 {"user_id": random.randint(1, 50000), "status": random.choice(statuses)}
                 for _ in range(BATCH_SIZE)
             ]
-            connection.execute(tables['carts'].insert(), c_batch)
-            print(f"⚡ Injected carts chunk {i} to {i + BATCH_SIZE}")  # ADD THIS LINE TO BREAK THE SILENCE!
+            connection.execute(tables["carts"].insert(), c_batch)
+            print(
+                f"Injected carts chunk {i} to {i + BATCH_SIZE}"
+            )  # ADD THIS LINE TO BREAK THE SILENCE!
 
         # Dynamically capture the valid cart ID boundary
         min_c = connection.execute(select(func.min(tables["carts"].c.id))).scalar() or 1
