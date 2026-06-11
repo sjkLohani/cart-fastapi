@@ -10,10 +10,6 @@ jobs:
     steps:
       - name: Checkout Application Repository Code
         uses: actions/checkout@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
       # ... (Your Ruff and Bandit steps live here) ...
 
   deploy:
@@ -22,6 +18,10 @@ jobs:
     steps:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
         # ... (Your ECR authentication & build steps live here) ...
 
       #THIS IS EXACTLY WHERE THE NEW CANARY STEP BELONGS
