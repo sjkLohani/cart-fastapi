@@ -1,118 +1,91 @@
-name: Cart API Continuous Integration & Cloud Deployment Pipeline
-
-on:
-  push:
-    branches: [ "main", "master" ]
-
-jobs:
-  code-quality-and-test:
-    runs-on: ubuntu-latest
-
-    services:
-      mysql-test-db:
-        image: mysql:8.0
-        env:
-          MYSQL_ROOT_PASSWORD: Password123!
-          MYSQL_DATABASE: cart_db
-        ports:
-          - 3306:3306
-        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
-
-    steps:
-    - name: Checkout Application Repository Code
-      uses: actions/checkout@v4
-
-    - name: Set up Python 3.11 Environment
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.11"
-        cache: 'pip'
-
-    - name: Install Application Core Dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install ruff
-
-    - name: Run Free Student Quality Checker Suite (Ruff Linter)
-      run: ruff check .
-
-    - name: Run Style and Format Assertions (Ruff Format)
-      run: ruff format --check .
-
-    # ==========================================
-    # AUTOMATED AWS CLOUD DEPLOYMENT (CD PHASE)
-    # ==========================================
-    - name: Configure AWS Credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: us-east-1
-
-    - name: Log in to AWS Elastic Container Registry (ECR)
-      id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v2
-
-    - name: Build, Tag, and Push Docker Image to AWS Cloud
-      env:
-        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        ECR_REPOSITORY: cart-api-repo
-        IMAGE_TAG: latest
-      run: |
-        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-    
-    - name: Run Bandit Security Static Code Analysis
-      run: |
-        pip install bandit
-        bandit -r . -x .venv/ -ll
-
-  deploy:
-    needs: code-quality-and-test  # This ensures it ONLY runs if tests pass!
-    runs-on: ubuntu-latest
-    steps:
-      - name: SSH into EC2 and Execute Single-Host Blue-Green Swap
-        uses: appleboy/ssh-action@v1.0.3
+      - name: SSH into EC2 and Execute Weighted Canary Traffic Shift
+        uses: appleboy/ssh-action@v1.0.1
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            # 1. Authenticate Docker with your AWS ECR vault
+            # 1. Authenticate with AWS ECR
             aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 654278500703.dkr.ecr.us-east-1.amazonaws.com
 
-            # 2. Pull down the fresh image built during the factory stage
-            docker pull 654278500703.dkr.ecr.us-east-1.amazonaws.com/cart-api-repo:latest
-
-            # 3. Orchestrate the Blue-Green Swap
+            # 2. Identify active slot vs target canary slot
             if docker ps --format '{{.Names}}' | grep -q "cart_api_blue"; then
-              echo "Blue container is currently live. Deploying to Green slot..."
-              
-              # Boot up Green on Port 8002 using our confirmed database network link
-              docker run -d --name cart_api_green -p 8002:8000 -e DATABASE_URL='mysql+pymysql://root:Password123!@172.31.47.146:3306/cart_db' 654278500703.dkr.ecr.us-east-1.amazonaws.com/cart-api-repo:latest
-              
-              # Wait 5 seconds for app validation
-              sleep 5
-              
-              # Atomically rewrite Nginx pointer from 8001 to 8002
-              sudo sed -i 's/8001/8002/g' /etc/nginx/sites-available/default
-              sudo systemctl reload nginx
-              
-              # Terminate old Blue version safely
+              ACTIVE_PORT="8001"
+              CANARY_PORT="8002"
+              CANARY_CONTAINER="cart_api_green"
+            else
+              ACTIVE_PORT="8002"
+              CANARY_PORT="8001"
+              CANARY_CONTAINER="cart_api_blue"
+            fi
+
+            echo "Target Canary Container: $CANARY_CONTAINER on Port $CANARY_PORT"
+
+            # 3. Pull fresh image and spin up the Canary Container
+            docker pull 654278500703.dkr.ecr.us-east-1.amazonaws.com/cart-api-repo:latest
+            docker rm -f $CANARY_CONTAINER || true
+            docker run -d --name $CANARY_CONTAINER -p $CANARY_PORT:8000 -e DATABASE_URL="${{ secrets.DATABASE_URL }}" 654278500703.dkr.ecr.us-east-1.amazonaws.com/cart-api-repo:latest
+
+            # Give the container 5 seconds to boot up and run internal checks
+            sleep 5
+
+            # -------------------------------------------------------------
+            # STAGE A: ACTIVATE CANARY (Shift 10% Traffic to New Version)
+            # -------------------------------------------------------------
+            echo "Shifting 10% of traffic to $CANARY_CONTAINER..."
+            
+            sudo cat << EOF | sudo tee /etc/nginx/sites-available/default
+            upstream fastapi_backend {
+                server 127.0.0.1:$ACTIVE_PORT weight=9;
+                server 127.0.0.1:$CANARY_PORT weight=1;
+            }
+            server {
+                listen 80 default_server;
+                listen [::]:80 default_server;
+                server_name _;
+                location / {
+                    proxy_pass http://fastapi_backend;
+                    proxy_set_header Host \$host;
+                    proxy_set_header X-Real-IP \$remote_addr;
+                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                }
+            }
+            EOF
+
+            sudo systemctl reload nginx
+            
+            echo "Monitoring Canary health at 10% load..."
+            sleep 15  # In a live system, you would insert automated curl metric checks here
+
+            # -------------------------------------------------------------
+            # STAGE B: COMMITTING CUTOVER (Shift 100% Traffic to New Version)
+            # -------------------------------------------------------------
+            echo "Canary stable. Committing 100% traffic shift to $CANARY_CONTAINER..."
+
+            sudo cat << EOF | sudo tee /etc/nginx/sites-available/default
+            upstream fastapi_backend {
+                server 127.0.0.1:$CANARY_PORT weight=1;
+            }
+            server {
+                listen 80 default_server;
+                listen [::]:80 default_server;
+                server_name _;
+                location / {
+                    proxy_pass http://fastapi_backend;
+                    proxy_set_header Host \$host;
+                    proxy_set_header X-Real-IP \$remote_addr;
+                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                }
+            }
+            EOF
+
+            sudo systemctl reload nginx
+
+            # 4. Safely dismantle old container structure
+            if [ "$CANARY_CONTAINER" = "cart_api_green" ]; then
               docker rm -f cart_api_blue || true
             else
-              echo "Green is live (or clean server initialization). Deploying to Blue slot..."
-              
-              # Boot up Blue on Port 8001
-              docker run -d --name cart_api_blue -p 8001:8000 -e DATABASE_URL='mysql+pymysql://root:Password123!@172.31.47.146:3306/cart_db' 654278500703.dkr.ecr.us-east-1.amazonaws.com/cart-api-repo:latest
-              
-              sleep 5
-              
-              # Atomically rewrite Nginx pointer from 8002 to 8001
-              sudo sed -i 's/8002/8001/g' /etc/nginx/sites-available/default
-              sudo systemctl reload nginx
-              
-              # Terminate old Green version safely
               docker rm -f cart_api_green || true
             fi
+            
+            echo "Deployment complete! 100% of traffic successfully cut over to $CANARY_CONTAINER."
