@@ -1,3 +1,26 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  code-quality-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Application Repository Code
+        uses: actions/checkout@v4
+      # ... (Your Ruff and Bandit steps live here) ...
+
+  deploy:
+    needs: code-quality-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        # ... (Your ECR authentication & build steps live here) ...
+
+      #THIS IS EXACTLY WHERE THE NEW CANARY STEP BELONGS
       - name: SSH into EC2 and Execute Weighted Canary Traffic Shift
         uses: appleboy/ssh-action@v1.0.1
         with:
@@ -26,15 +49,14 @@
             docker rm -f $CANARY_CONTAINER || true
             docker run -d --name $CANARY_CONTAINER -p $CANARY_PORT:8000 -e DATABASE_URL="${{ secrets.DATABASE_URL }}" 654278500703.dkr.ecr.us-east-1.amazonaws.com/cart-api-repo:latest
 
-            # Give the container 5 seconds to boot up and run internal checks
             sleep 5
 
             # -------------------------------------------------------------
-            # STAGE A: ACTIVATE CANARY (Shift 10% Traffic to New Version)
+            # STAGE A: ACTIVATE CANARY (Shift 10% Traffic)
             # -------------------------------------------------------------
-            echo "Shifting 10% of traffic to $CANARY_CONTAINER..."
+            echo "🚦 Shifting 10% of traffic to $CANARY_CONTAINER..."
             
-            sudo cat << EOF | sudo tee /etc/nginx/sites-available/default
+            sudo cat << 'EOF' | sudo tee /etc/nginx/sites-available/default
             upstream fastapi_backend {
                 server 127.0.0.1:$ACTIVE_PORT weight=9;
                 server 127.0.0.1:$CANARY_PORT weight=1;
@@ -45,26 +67,26 @@
                 server_name _;
                 location / {
                     proxy_pass http://fastapi_backend;
-                    proxy_set_header Host \$host;
-                    proxy_set_header X-Real-IP \$remote_addr;
-                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                    proxy_set_header Host $host;
+                    proxy_set_header X-Real-IP $remote_addr;
+                    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
                 }
             }
-            EOF
+    EOF
 
             sudo systemctl reload nginx
             
             echo "Monitoring Canary health at 10% load..."
-            sleep 15  # In a live system, you would insert automated curl metric checks here
+            sleep 15
 
             # -------------------------------------------------------------
-            # STAGE B: COMMITTING CUTOVER (Shift 100% Traffic to New Version)
+            # STAGE B: COMMITTING CUTOVER (Shift 100% Traffic)
             # -------------------------------------------------------------
             echo "Canary stable. Committing 100% traffic shift to $CANARY_CONTAINER..."
 
-            sudo cat << EOF | sudo tee /etc/nginx/sites-available/default
+            sudo cat << 'EOF' | sudo tee /etc/nginx/sites-available/default
             upstream fastapi_backend {
-                server 127.0.0.1:$CANARY_PORT weight=1;
+                server 127.0.0.1:$CANARY_PORT;
             }
             server {
                 listen 80 default_server;
@@ -72,12 +94,12 @@
                 server_name _;
                 location / {
                     proxy_pass http://fastapi_backend;
-                    proxy_set_header Host \$host;
-                    proxy_set_header X-Real-IP \$remote_addr;
-                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                    proxy_set_header Host $host;
+                    proxy_set_header X-Real-IP $remote_addr;
+                    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
                 }
             }
-            EOF
+    EOF
 
             sudo systemctl reload nginx
 
